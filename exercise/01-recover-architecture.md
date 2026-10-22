@@ -36,17 +36,26 @@ evidence: system/online-boutique/protos/demo.proto, system/online-boutique/kuber
 
 ตรวจสอบ dependency ในตารางของ Run B **อย่างน้อยห้ารายการ** เทียบกับไฟล์จริง โดยเปิดไฟล์ที่ AI อ้างถึงและหาหลักฐาน นิสิตสามารถตรวจซอร์สโค้ดของ service ได้ด้วย เช่น `src/checkoutservice/main.go`
 
-| ผู้เรียก → ผู้ถูกเรียก | หลักฐานที่ AI อ้าง | ยืนยันแล้วหรือไม่ ✅ / ❌ / ❓ | สิ่งที่นิสิตพบ |
+| ผู้เรียก -> ผู้ถูกเรียก | หลักฐานที่ AI อ้าง | ยืนยันแล้วหรือไม่ ✅ / ❌ / ❓ | สิ่งที่นิสิตพบ |
 |---|---|---|---|
-| | | | |
-| | | | |
-| | | | |
-| | | | |
-| | | | |
+| `checkoutservice` -> `cartservice` | `checkoutservice.yaml (CART_SERVICE_ADDR)` | ✅ | `src/checkoutservice/main.go` บรรทัด 113 อ่าน env, บรรทัด 120 เชื่อม gRPC, เรียก `GetCart` (325) และ `EmptyCart` (333) |
+| `checkoutservice` -> `emailservice` | `checkoutservice.yaml (EMAIL_SERVICE_ADDR)` | ✅ | `src/checkoutservice/main.go` บรรทัด 115 อ่าน env, เรียก `SendOrderConfirmation` (380); ถ้าล้มเหลวแค่ `log.Warnf` แล้วคำสั่งซื้อยังสำเร็จ (273-274) |
+| `frontend` -> `shippingservice` | `frontend.yaml (SHIPPING_SERVICE_ADDR)` | ✅ | `src/frontend/main.go` บรรทัด 137 อ่าน env, 145 เชื่อม gRPC; `src/frontend/rpc.go` บรรทัด 88 เรียกเฉพาะ `GetQuote` |
+| `recommendationservice` -> `productcatalogservice` | `recommendationservice.yaml (PRODUCT_CATALOG_SERVICE_ADDR)` | ✅ | `src/recommendationservice/recommendation_server.py` บรรทัด 131 อ่าน env, 135 ใช้ `grpc.insecure_channel`, 73 เรียก `ListProducts` |
+| `cartservice` -> `redis-cart` | `cartservice.yaml (REDIS_ADDR)` | ✅ | `src/cartservice/src/Startup.cs` บรรทัด 29 อ่าน `REDIS_ADDR`, 36-40 ใช้ `AddStackExchangeRedisCache` + `RedisCartStore` |
 
-- **สิ่งที่ผิดหรือขาดหายไป** ใน Run B (dependency ที่ไม่มีจริง, dependency ที่ขาดไป, container ที่น่าสงสัย): …
+- **สิ่งที่ผิดหรือขาดหายไป** ใน Run B (dependency ที่ไม่มีจริง, dependency ที่ขาดไป, container ที่น่าสงสัย): dependency มีอยู่จริงใน code แต่ Run B ยังมีจุดที่พลาดอยู่
+  1. `checkoutservice` ส่ง trace ไปที่ OpenTelemetry collector ผ่าน gRPC (`COLLECTOR_SERVICE_ADDR`, `src/checkoutservice/main.go` บรรทัด 164-165) แต่จะทำงานเฉพาะเมื่อตั้ง `ENABLE_TRACING=1` (บรรทัด 90) ซึ่ง manifest ไม่ได้ตั้งไว้ ทำให้ Run B ไม่เห็น
+  2. ตารางบอกแค่ว่า "ใครเรียกใคร" แต่ไม่บอกว่าเรียก RPC ไหน เช่น `checkoutservice` เรียกทั้ง `GetQuote` และ `ShipOrder` (บรรทัด 314, 387) ส่วน `frontend` เรียกแค่ `GetQuote`
+  3. Run B บอกว่า image เดียวที่ระบุ tag คือ `redis:alpine` แต่ `loadgenerator.yaml` บรรทัด 67 ยังมี `busybox:1.38.0` อีกตัว
+  นอกจากนี้ `cartservice` ไม่ได้ผูกติดกับ Redis เพราะ `Startup.cs` บรรทัด 42-56 สลับไปใช้ Spanner, AlloyDB หรือ in-memory ได้ ข้อนี้ manifest ไม่ได้บอกไว้
 
 ## สะท้อนคิด (ข้อละ 2–3 ประโยค)
 
 1. เปรียบเทียบ A กับ B: agent **ไม่สามารถ**รู้อะไรได้จากไฟล์ `.proto` เพียงไฟล์เดียว และเพราะเหตุใด
+
+Run A ไม่รู้ว่า service ไหนเรียก service ไหน และยังไม่เห็น frontend กับ redis-cart เพราะ .proto บอกแค่ว่าแต่ละ service มี RPC อะไรให้เรียก แต่ไม่ได้บอกว่าใครเป็นผู้เรียก ส่วน frontend ไม่ได้เปิด gRPC service ให้ใคร และ Redis ก็ไม่ได้ใช้ gRPC จึงไม่มีอยู่ใน proto ข้อมูลพวกนี้ต้องดูจาก env var *_ADDR ใน manifest แทน
+
 2. ข้อผิดพลาด**ข้อใดข้อหนึ่ง**ที่จะทำให้สมาชิกใหม่ของทีมเข้าใจผิดมากที่สุด หากเผยแพร่แผนภาพนี้โดยไม่ตรวจสอบ
+
+- คนที่อ่านแผนภาพจะเชื่อว่า checkout service ไม่ได้ส่งข้อมูลออกไปที่อื่นเลย แต่ถ้าเปิด tracing ขึ้นมาจะมีข้อมูลไหลออกไปอีกทาง ซึ่งมีผลทั้งต่อการ debug และต่อเรื่องความปลอดภัย
