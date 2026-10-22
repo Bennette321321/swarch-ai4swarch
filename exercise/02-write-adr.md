@@ -35,10 +35,10 @@ language: Thai
 
 | เกณฑ์ | Run a | Run b |
 |---|---|---|
-| ใช้ตัวเลขจาก scenario หรือไม่ (latency, ช่วงพีก, ข้อจำกัดของ MailFast) | | |
-| ทางเลือกที่พิจารณา (ระบุ) | | |
-| จัดการแต้มสะสมแบบ "ครั้งเดียวเท่านั้น" และ rate limit ของ MailFast หรือไม่ อย่างไร | | |
-| มีสิ่งที่แต่งขึ้นเองหรือไม่ (ตัวเลข เครื่องมือ หรือข้อเท็จจริงที่ไม่มีใน scenario) | | |
+| ใช้ตัวเลขจาก scenario หรือไม่ (latency, ช่วงพีก, ข้อจำกัดของ MailFast) | ไม่ใช้เลย เพราะไม่ได้อ่าน scenario แต่ไม่แต่งตัวเลขเอง ยกไปเป็น Open questions 10 ข้อ | ใช้ครบ: p95 <= 500 ms (ปัจจุบัน 300 ms), 200 orders/s, MailFast p95 1.5 s / p99 8 s / fail 0.5% / 50 emails/s, แต้มภายใน 1 นาที และคำนวณ backlog 9,000 ฉบับต่อนาทีช่วงพีก |
+| ทางเลือกที่พิจารณา (ระบุ) | A: synchronous orchestration, B: pub/sub (เลือก, ไม่ระบุ broker), C: post-order orchestrator | 1: sync orchestration, 2: in-process goroutine, 3: RabbitMQ (เลือก), 4: Kafka |
+| จัดการแต้มสะสมแบบ "ครั้งเดียวเท่านั้น" และ rate limit ของ MailFast หรือไม่ อย่างไร | แต้ม: consumer idempotent ใช้ order ID เป็น key; rate limit: พูดกว้าง ๆ แค่ retry + backoff เพราะไม่รู้ตัวเลข 50/s | แต้ม: unique constraint บน `order_id` ใน transaction เดียวกันก่อน ack และแยก queue จากอีเมล; rate limit: limiter รวมทุก replica ≤ 50/s ให้ queue รับ backlog |
+| มีสิ่งที่แต่งขึ้นเองหรือไม่ (ตัวเลข เครื่องมือ หรือข้อเท็จจริงที่ไม่มีใน scenario) | แทบไม่มี ทุกข้อสันนิษฐานติดป้าย [Inferred] / Assumption ไว้ (เดาว่า checkout เรียก email แบบ sync ถูก ทั้งที่ไม่ได้อ่านโค้ด) | ระบุ `HTTPS` ระหว่าง customer กับ frontend โดยไม่มีหลักฐาน (manifest เป็น HTTP port 80); ใส่ `frontend → checkout` ที่ไม่อยู่ใน context (ติด [Inferred]) |
 
 ## รับผิดชอบ ADR ฉบับสุดท้ายของตัวเอง
 
@@ -51,6 +51,6 @@ language: Thai
 
 | # | สิ่งที่เปลี่ยนจากร่างของ AI | เหตุผล |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
+| 1 | เปลี่ยน protocol ระหว่าง customer กับ frontend จาก HTTPS เป็น HTTP | AI แต่งขึ้นเอง หลักฐานใน `frontend.yaml` คือ HTTP port 80 |
+| 2 | เพิ่ม transactional outbox ให้ checkout แทนการ log แล้วใช้ reconciliation job | ร่างของ AI ขัดกันเอง (เสนอ reconciliation แต่ยอมรับว่าไม่มีที่เก็บ order) และถ้าแต้มหาย ลูกค้าเสียหายโดยตรง |
+| 3 | ลบบรรทัดระบุ agent และใส่ชื่อตัวเองเป็น Deciders | Deciders เป็นผู้รับผิดชอบ ไม่ใช่ AI |
